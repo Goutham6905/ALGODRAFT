@@ -1,0 +1,18 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend/papers:/app/papers
+      - ./backend/chroma_db:/app/chroma_db
+    env_file:
+      - .env
+    environment:
+      - CHROMA_DIR=/app/chroma_db
+    # Ollama runs on the host; use host networking or set OLLAMA_HOST
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
