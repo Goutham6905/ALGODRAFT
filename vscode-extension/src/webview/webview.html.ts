@@ -115,6 +115,27 @@ export function getWebviewContent(webview: any, extensionUri: any) {
     background-clip: text;
   }
 
+  #new-chat-btn {
+    margin-left: auto;
+    padding: 5px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    background: transparent;
+    color: var(--purple-300);
+    border: 1px solid var(--border-bright);
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    font-family: var(--font-ui);
+  }
+
+  #new-chat-btn:hover {
+    background: rgba(97, 0, 194, 0.25);
+    color: var(--purple-100);
+    box-shadow: 0 0 10px var(--accent-glow);
+  }
+
   #chat {
     flex: 1;
     overflow-y: auto;
@@ -478,6 +499,14 @@ export function getWebviewContent(webview: any, extensionUri: any) {
   }
 
   #savecfg:hover { background: linear-gradient(135deg, var(--purple-400), var(--purple-300)); box-shadow: 0 0 12px rgba(97,0,194,0.45); }
+
+  .model-meta {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 6px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.05em;
+  }
 </style>
 </head>
 <body>
@@ -487,6 +516,7 @@ export function getWebviewContent(webview: any, extensionUri: any) {
     <div id="header">
       <div class="dot"></div>
       <h1>AlgoDraft</h1>
+      <button id="new-chat-btn">✦ New Chat</button>
     </div>
 
     <div id="chat"></div>
@@ -553,7 +583,7 @@ export function getWebviewContent(webview: any, extensionUri: any) {
 <script nonce="${nonce}">
   const vscode = acquireVsCodeApi();
 
-  // Grab elements directly — same flat pattern as the working code
+  // Grab elements directly
   const chat            = document.getElementById('chat');
   const modeSelect      = document.getElementById('mode');
   const providerGroup   = document.getElementById('provider-group');
@@ -593,9 +623,9 @@ export function getWebviewContent(webview: any, extensionUri: any) {
   canvasCloseBtn.addEventListener('click', closeCanvas);
   canvasCopyBtn.addEventListener('click', () => {
     navigator.clipboard.writeText(canvasEditor.value).then(() => {
-      canvasCopyBtn.innerHTML = '<span>✓</span> Copied!';
+      canvasCopyBtn.innerHTML = '<span>\u2713</span> Copied!';
       canvasCopyBtn.classList.add('copied');
-      setTimeout(() => { canvasCopyBtn.innerHTML = '<span>⎘</span> Copy'; canvasCopyBtn.classList.remove('copied'); }, 2000);
+      setTimeout(() => { canvasCopyBtn.innerHTML = '<span>\u2358</span> Copy'; canvasCopyBtn.classList.remove('copied'); }, 2000);
     });
   });
   document.addEventListener('keydown', (e) => {
@@ -621,7 +651,7 @@ export function getWebviewContent(webview: any, extensionUri: any) {
     const container = document.createElement('div');
     container.className = 'response-container';
     const bt = String.fromCharCode(96);
-    const parts = text.split(new RegExp('(' + bt + bt + bt + '[\\s\\S]*?' + bt + bt + bt + '|' + bt + '[^' + bt + ']*' + bt + ')', 'g'));
+    const parts = text.split(new RegExp('(' + bt + bt + bt + '[\\s\\S]*?' + bt + bt + bt + ')', 'g'));
     let textBuf = '';
     parts.forEach(part => {
       if (!part) return;
@@ -662,8 +692,8 @@ export function getWebviewContent(webview: any, extensionUri: any) {
     const content     = blockText.slice(3, -3);
     const lines       = content.split('\\n');
     const firstLine   = lines[0] || '';
-    const lang        = firstLine.match(/^([a-z0-9]*)/i)?.[1] || 'code';
-    const codeContent = content.slice(firstLine.length).replace(/^\\n/, '').trimEnd();
+    const lang        = firstLine.match(new RegExp('^([a-z0-9]*)', 'i'))?.[1] || 'code';
+    const codeContent = content.slice(firstLine.length).replace(new RegExp('^\\\\n'), '').trimEnd();
 
     const header = document.createElement('div');
     header.className = 'code-header';
@@ -683,18 +713,18 @@ export function getWebviewContent(webview: any, extensionUri: any) {
 
     const copyBtn = document.createElement('button');
     copyBtn.className = 'code-btn copy-btn';
-    copyBtn.innerHTML = '<span class="btn-icon">⎘</span> Copy';
+    copyBtn.innerHTML = '<span class="btn-icon">\u2358</span> Copy';
     copyBtn.addEventListener('click', () => {
       navigator.clipboard.writeText(codeContent).then(() => {
-        copyBtn.innerHTML = '<span class="btn-icon">✓</span> Copied!';
+        copyBtn.innerHTML = '<span class="btn-icon">\u2713</span> Copied!';
         copyBtn.classList.add('copied');
-        setTimeout(() => { copyBtn.innerHTML = '<span class="btn-icon">⎘</span> Copy'; copyBtn.classList.remove('copied'); }, 2000);
+        setTimeout(() => { copyBtn.innerHTML = '<span class="btn-icon">\u2358</span> Copy'; copyBtn.classList.remove('copied'); }, 2000);
       });
     });
 
     const canvasBtn = document.createElement('button');
     canvasBtn.className = 'code-btn canvas-btn';
-    canvasBtn.innerHTML = '<span class="btn-icon">◈</span> Canvas';
+    canvasBtn.innerHTML = '<span class="btn-icon">\u25c8</span> Canvas';
     canvasBtn.addEventListener('click', () => {
       if (activeCanvasBtn === canvasBtn && canvasPanel.classList.contains('open')) { closeCanvas(); return; }
       if (activeCanvasBtn) activeCanvasBtn.classList.remove('active');
@@ -719,6 +749,47 @@ export function getWebviewContent(webview: any, extensionUri: any) {
     return container;
   }
 
+  // Render structured backend response (sections array from AgentHandler)
+  function formatStructuredResponse(data) {
+    const container = document.createElement('div');
+    container.className = 'response-container';
+    const sections = data.sections || [];
+
+    // If no sections but raw text exists, fall back to plain formatting
+    if (sections.length === 0 && data.raw) {
+      container.appendChild(formatResponse(data.raw));
+      return container;
+    }
+
+    sections.forEach(section => {
+      if (section.type === 'code') {
+        const lang = section.language || 'code';
+        const bt = String.fromCharCode(96);
+        const fakeBlock = bt+bt+bt + lang + '\\n' + section.content + '\\n' + bt+bt+bt;
+        container.appendChild(createCodeBlock(fakeBlock));
+      } else if (section.type === 'error') {
+        const errDiv = document.createElement('div');
+        errDiv.className = 'section';
+        errDiv.style.borderColor = 'rgba(224, 92, 122, 0.5)';
+        errDiv.style.color = '#e05c7a';
+        errDiv.textContent = section.content;
+        container.appendChild(errDiv);
+      } else {
+        // type === 'text'
+        container.appendChild(createSection(section.content));
+      }
+    });
+
+    // Model/provider badge
+    if (data.model_used) {
+      const meta = document.createElement('div');
+      meta.style.cssText = 'font-size:10px;color:#4a3566;margin-top:6px;font-family:var(--font-mono);letter-spacing:.05em;';
+      meta.textContent = (data.provider_used || 'local') + ' \u2022 ' + data.model_used;
+      container.appendChild(meta);
+    }
+    return container;
+  }
+
   function addMsg(txt, cls) {
     cls = cls || 'bot';
     const msgDiv = document.createElement('div');
@@ -740,6 +811,40 @@ export function getWebviewContent(webview: any, extensionUri: any) {
     msgDiv.appendChild(contentDiv);
     chat.appendChild(msgDiv);
     chat.scrollTop = chat.scrollHeight;
+  }
+
+  // Render a structured AgentResponse object directly in chat
+  function addStructuredMsg(data) {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'message bot';
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'msg-content';
+    const label = document.createElement('div');
+    label.className = 'bot-label';
+    label.textContent = 'AlgoDraft';
+    contentDiv.appendChild(label);
+    contentDiv.appendChild(formatStructuredResponse(data));
+    msgDiv.appendChild(contentDiv);
+    chat.appendChild(msgDiv);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  // Smart dispatcher: handles both plain string payloads and structured objects
+  function handleBotPayload(payload, prefix) {
+    if (payload && typeof payload === 'object' && Array.isArray(payload.sections)) {
+      // Structured AgentResponse from backend
+      if (prefix) {
+        // Prepend a plain text section for labels like "Analysis Result:"
+        payload.sections.unshift({ type: 'text', content: prefix });
+      }
+      addStructuredMsg(payload);
+    } else if (payload && typeof payload === 'object' && payload.raw) {
+      // Object with raw string (partial structured)
+      addMsg((prefix ? prefix + '\\n' : '') + payload.raw, 'bot');
+    } else {
+      // Plain string
+      addMsg((prefix ? prefix + '\\n' : '') + (payload || ''), 'bot');
+    }
   }
 
   // Send
@@ -789,7 +894,7 @@ export function getWebviewContent(webview: any, extensionUri: any) {
       name.title = paper;
       const removeBtn = document.createElement('button');
       removeBtn.className = 'paper-remove';
-      removeBtn.textContent = '\\u2715';
+      removeBtn.textContent = '\u2715';
       removeBtn.addEventListener('click', () => removePaper(paper));
       tag.appendChild(name);
       tag.appendChild(removeBtn);
@@ -815,15 +920,32 @@ export function getWebviewContent(webview: any, extensionUri: any) {
     });
   });
 
-  // Message handler
+  // New chat
+  document.getElementById('new-chat-btn').addEventListener('click', () => {
+    chat.innerHTML = '';
+    closeCanvas();
+    vscode.postMessage({ type: 'newSession', payload: {} });
+  });
+
+  // Message handler — covers all message types the extension bridge can send
   window.addEventListener('message', event => {
     const m = event.data;
-    if (m.type === 'answer')        addMsg(m.payload, 'bot');
-    if (m.type === 'analysis')      addMsg('Analysis Result:\\n' + m.payload, 'bot');
-    if (m.type === 'papersList')    renderPapersList(m.payload.papers || []);
-    if (m.type === 'uploadSuccess') addMsg('\\u2713 File uploaded: ' + m.payload.filename, 'bot');
-    if (m.type === 'uploadError')   addMsg('\\u2717 Upload error: ' + m.payload.error, 'bot');
-    if (m.type === 'papersError')   addMsg('\\u2717 Error loading papers: ' + m.payload.error, 'bot');
+    if (!m) return;
+
+    // Structured AgentResponse forwarded directly
+    if (m.type === 'structuredAnswer') { handleBotPayload(m.payload, ''); return; }
+
+    // Plain answer string or structured object
+    if (m.type === 'answer')           { handleBotPayload(m.payload, ''); return; }
+
+    // Analysis result — payload may be string or structured object
+    if (m.type === 'analysis')         { handleBotPayload(m.payload, 'Analysis Result'); return; }
+
+    // Paper / upload status
+    if (m.type === 'papersList')       { renderPapersList(m.payload.papers || []); return; }
+    if (m.type === 'uploadSuccess')    { addMsg('\u2713 File uploaded: ' + m.payload.filename, 'bot'); return; }
+    if (m.type === 'uploadError')      { addMsg('\u2717 Upload error: ' + m.payload.error, 'bot'); return; }
+    if (m.type === 'papersError')      { addMsg('\u2717 Error loading papers: ' + m.payload.error, 'bot'); return; }
   });
 
   loadPapersList();

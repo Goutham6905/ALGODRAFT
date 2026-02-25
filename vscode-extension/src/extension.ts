@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { getWebviewContent } from './webview/webview.html';
+import * as crypto from 'crypto';
 
 const BACKEND_URL = process.env.ALGODRAFT_BACKEND || 'http://127.0.0.1:8000';
 
@@ -13,7 +14,8 @@ function sanitizeError(message: string): string {
 }
 
 export function activate(context: vscode.ExtensionContext) {
-  const provider = new AlgoDraftViewProvider(context.extensionUri);
+  const sessionId = crypto.randomUUID();
+  const provider = new AlgoDraftViewProvider(context.extensionUri, sessionId);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(AlgoDraftViewProvider.viewType, provider)
   );
@@ -55,13 +57,16 @@ export function activate(context: vscode.ExtensionContext) {
   }));
 }
 
-export function deactivate() {}
+export function deactivate() { }
 
 class AlgoDraftViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = 'algodraft.sidebar';
   private _view?: vscode.WebviewView;
+  private _sessionId: string;
 
-  constructor(private readonly _extensionUri: vscode.Uri) {}
+  constructor(private readonly _extensionUri: vscode.Uri, sessionId: string) {
+    this._sessionId = sessionId;
+  }
 
   public resolveWebviewView(webviewView: vscode.WebviewView) {
     this._view = webviewView;
@@ -74,6 +79,12 @@ class AlgoDraftViewProvider implements vscode.WebviewViewProvider {
       switch (m.type) {
         case 'query':
           await this.handleQuery(m.payload);
+          break;
+        case 'chat':
+          await this.handleChat(m.payload);
+          break;
+        case 'generate':
+          await this.handleGenerate(m.payload);
           break;
         case 'insert':
           await this.handleInsert(m.payload);
@@ -90,6 +101,9 @@ class AlgoDraftViewProvider implements vscode.WebviewViewProvider {
         case 'removePaper':
           await this.handleRemovePaper(m.payload);
           break;
+        case 'newSession':
+          await this.handleNewSession();
+          break;
       }
     });
   }
@@ -103,18 +117,88 @@ class AlgoDraftViewProvider implements vscode.WebviewViewProvider {
       const res = await fetch(`${BACKEND_URL}/query`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: payload.prompt, top_k: 3 })
+        body: JSON.stringify({ prompt: payload.prompt, top_k: 3, session_id: this._sessionId })
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
         throw new Error(err.detail || `Backend returned ${res.status}`);
       }
       const data = await res.json();
-      this.postMessage({ type: 'answer', payload: data.answer });
+      // Send structured response if available, fall back to raw answer
+      if (data.sections && data.sections.length > 0) {
+        this.postMessage({ type: 'structuredAnswer', payload: data });
+      } else {
+        this.postMessage({ type: 'answer', payload: data.answer });
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       const sanitized = sanitizeError(message);
       vscode.window.showErrorMessage('Query failed: ' + sanitized);
+    }
+  }
+
+  private async handleChat(payload: { prompt: string }) {
+    try {
+      const res = await fetch(`${BACKEND_URL}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: payload.prompt, session_id: this._sessionId })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || `Backend returned ${res.status}`);
+      }
+      const data = await res.json();
+      if (data.sections && data.sections.length > 0) {
+        this.postMessage({ type: 'structuredAnswer', payload: data });
+      } else {
+        this.postMessage({ type: 'answer', payload: data.answer });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const sanitized = sanitizeError(message);
+      vscode.window.showErrorMessage('Chat failed: ' + sanitized);
+    }
+  }
+
+  private async handleGenerate(payload: { prompt: string; language?: string }) {
+    try {
+      const res = await fetch(`${BACKEND_URL}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: payload.prompt,
+          language: payload.language || 'python',
+          session_id: this._sessionId
+        })
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || `Backend returned ${res.status}`);
+      }
+      const data = await res.json();
+      if (data.sections && data.sections.length > 0) {
+        this.postMessage({ type: 'structuredAnswer', payload: data });
+      } else {
+        this.postMessage({ type: 'answer', payload: data.answer });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const sanitized = sanitizeError(message);
+      vscode.window.showErrorMessage('Code generation failed: ' + sanitized);
+    }
+  }
+
+  private async handleNewSession() {
+    try {
+      // Clear the old session on the backend
+      await fetch(`${BACKEND_URL}/sessions/${this._sessionId}`, { method: 'DELETE' });
+      // Generate a new session ID
+      this._sessionId = crypto.randomUUID();
+      this.postMessage({ type: 'sessionReset', payload: { session_id: this._sessionId } });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      vscode.window.showErrorMessage('Failed to reset session: ' + sanitizeError(message));
     }
   }
 
@@ -155,20 +239,20 @@ class AlgoDraftViewProvider implements vscode.WebviewViewProvider {
       for (let i = 0; i < binaryString.length; i++) {
         bytes[i] = binaryString.charCodeAt(i);
       }
-      
+
       const formData = new FormData();
       formData.append('file', new Blob([bytes]), name);
-      
+
       const res = await fetch(`${BACKEND_URL}/upload`, {
         method: 'POST',
         body: formData
       });
-      
+
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
         throw new Error(err.detail || `Backend returned ${res.status}`);
       }
-      
+
       this.postMessage({ type: 'uploadSuccess', payload: { filename: name } });
       await this.handleLoadPapers();
     } catch (err) {
@@ -200,12 +284,12 @@ class AlgoDraftViewProvider implements vscode.WebviewViewProvider {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filename: payload.filename })
       });
-      
+
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
         throw new Error(err.detail || `Backend returned ${res.status}`);
       }
-      
+
       await this.handleLoadPapers();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
