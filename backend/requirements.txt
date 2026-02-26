@@ -6,6 +6,7 @@ langchain-openai
 langchain-anthropic
 langchain-huggingface
 langchain-community
+langchain-chroma
 langchain-text-splitters
 chromadb
 sentence-transformers
@@ -16,3 +17,4 @@ pypandoc
 python-multipart
 requests
 python-dotenv
+tiktoken

@@ -1,0 +1,10 @@
+```json
+{
+  "mode": "local",
+  "local_model": "deepseek-coder:6.7b",
+  "local_code_model": "deepseek-coder:6.7b",
+  "cloud_provider": "huggingface",
+  "cloud_model": "meta-llama/Llama-2-70b-chat-hf",
+  "api_key": "YOUR_API_KEY_HERE"
+}
+```
